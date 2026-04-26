@@ -7,8 +7,240 @@ import {
   JobListing,
 } from "./seeker-chat-types";
 
-// Mock API function - replace with real backend endpoint later
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+
+type BackendWorker = {
+  id: number;
+  name: string | null;
+  location: string;
+  raw_experience: string;
+};
+
+type BackendSkill = {
+  id?: string | null;
+  name: string;
+  confidence?: number | null;
+  source?: string | null;
+  source_query?: string | null;
+};
+
+type BackendMatch = {
+  job_id: number;
+  title: string;
+  location: string;
+  score: number;
+  skill_score: number;
+  location_score: number;
+  matched_skills: string[];
+  missing_skills: Array<{
+    skill: string;
+    importance: string;
+    gap_size: string;
+    next_step: string;
+  }>;
+  labor_signals: Array<{
+    label: string;
+    value: string | number;
+    source: string;
+    year?: number | null;
+    explanation?: string | null;
+  }>;
+  automation_risk?: {
+    score: number;
+    level: "low" | "medium" | "high";
+    source: string;
+    calibration_note?: string | null;
+  } | null;
+  explanation: string;
+};
+
+async function postJson<TResponse>(
+  path: string,
+  body: unknown
+): Promise<TResponse> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`${path} failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function getJson<TResponse>(path: string): Promise<TResponse> {
+  const response = await fetch(`${API_BASE_URL}${path}`);
+
+  if (!response.ok) {
+    throw new Error(`${path} failed with ${response.status}`);
+  }
+
+  return response.json();
+}
+
 export async function generateSkillPassport(
+  profile: SeekerProfile
+): Promise<SkillPassport> {
+  try {
+    return await generateSkillPassportFromBackend(profile);
+  } catch (error) {
+    console.warn("Backend unavailable, using local mock passport:", error);
+    return generateMockSkillPassport(profile);
+  }
+}
+
+async function generateSkillPassportFromBackend(
+  profile: SeekerProfile
+): Promise<SkillPassport> {
+  const location = parseLocationFromDemographics(profile.demographics);
+
+  const worker = await postJson<BackendWorker>("/workers/", {
+    name: profile.fullName,
+    location,
+    raw_experience: [
+      profile.workDescription,
+      `Frequency: ${profile.activityFrequency}`,
+      `Demographics: ${profile.demographics}`,
+    ].join("\n"),
+  });
+
+  const skillsResponse = await getJson<{
+    worker_id: number;
+    skills: BackendSkill[];
+  }>(`/workers/${worker.id}/skills`);
+
+  const matchesResponse = await getJson<{
+    worker_id: number;
+    engine: string;
+    matches: BackendMatch[];
+  }>(`/matches/worker/${worker.id}`);
+
+  const mappedSkills = skillsResponse.skills.map((skill): MappedSkill => ({
+    name: skill.name,
+    escoCode: skill.id || "fallback-keyword",
+    iscoCategory: "ESCO skill",
+    proficiencyLevel: confidenceToProficiency(skill.confidence),
+    source: skill.source_query
+      ? `${skill.source || "backend"}: ${skill.source_query}`
+      : skill.source || "backend extraction",
+  }));
+
+  const opportunities = matchesResponse.matches.slice(0, 3).map((match) => ({
+    title: match.title,
+    organization: "UNMAPPED opportunity graph",
+    matchScore: Math.round(match.score),
+    type: "Employment" as const,
+    location: match.location,
+  }));
+
+  const jobListings = matchesResponse.matches.map((match): JobListing => ({
+    id: `JOB-${match.job_id}`,
+    title: match.title,
+    company: "Local opportunity provider",
+    location: match.location,
+    type: "Full-time",
+    salary: laborSignalSummary(match.labor_signals),
+    description: [
+      match.explanation,
+      ...match.missing_skills.slice(0, 1).map((gap) => `Next step: ${gap.next_step}`),
+    ].join(" "),
+    postedDate: "Backend match",
+    isRemote: match.location.toLowerCase() === "remote",
+    matchScore: Math.round(match.score),
+    matchedSkills: match.matched_skills,
+  }));
+
+  const aiInsights = buildBackendInsights(matchesResponse.matches);
+  const overallReadinessScore =
+    matchesResponse.matches.length > 0
+      ? Math.round(matchesResponse.matches[0].score)
+      : calculateReadinessScore(mappedSkills, aiInsights);
+
+  return {
+    id: `SP-${worker.id}`,
+    generatedAt: new Date(),
+    profile,
+    mappedSkills,
+    opportunities,
+    jobListings,
+    aiInsights,
+    overallReadinessScore,
+  };
+}
+
+function confidenceToProficiency(
+  confidence?: number | null
+): MappedSkill["proficiencyLevel"] {
+  if (confidence == null) return "Intermediate";
+  if (confidence >= 0.85) return "Advanced";
+  if (confidence >= 0.65) return "Intermediate";
+  return "Basic";
+}
+
+function laborSignalSummary(signals: BackendMatch["labor_signals"]): string {
+  if (!signals.length) return "Labor signals unavailable";
+  return signals
+    .slice(0, 2)
+    .map((signal) => `${signal.label}: ${signal.value}`)
+    .join(" | ");
+}
+
+function buildBackendInsights(matches: BackendMatch[]): AIReadinessInsight[] {
+  const bestMatch = matches[0];
+  const risk = bestMatch?.automation_risk;
+  const laborSignals = bestMatch?.labor_signals || [];
+  const missingSkill = bestMatch?.missing_skills?.[0];
+
+  return [
+    {
+      category: "Automation Risk",
+      riskLevel: riskLevelFromBackend(risk?.level),
+      description: risk
+        ? `${risk.source}: ${risk.calibration_note || `Exposure is ${risk.level}.`}`
+        : "Automation exposure data is not available for this match yet.",
+      recommendation:
+        missingSkill?.next_step ||
+        "Keep building evidence for durable hands-on and interpersonal skills.",
+    },
+    {
+      category: "Labor Market Signals",
+      riskLevel: "Low",
+      description: laborSignals.length
+        ? laborSignals
+            .slice(0, 2)
+            .map((signal) => `${signal.label}: ${signal.value}`)
+            .join(" ")
+        : "No labor market signals were returned for this profile.",
+      recommendation:
+        laborSignals[0]?.explanation ||
+        "Compare opportunities using both fit score and local market signals.",
+    },
+    {
+      category: "Skill Gaps",
+      riskLevel: missingSkill ? "Medium" : "Low",
+      description: missingSkill
+        ? `The strongest next gap is ${missingSkill.skill}.`
+        : "The top match did not return missing skills.",
+      recommendation:
+        missingSkill?.next_step || "Use the matched skills as portable evidence.",
+    },
+  ];
+}
+
+function riskLevelFromBackend(
+  level?: "low" | "medium" | "high"
+): AIReadinessInsight["riskLevel"] {
+  if (level === "low") return "Low";
+  if (level === "high") return "High";
+  return "Medium";
+}
+
+// Local mock fallback for offline frontend demos.
+async function generateMockSkillPassport(
   profile: SeekerProfile
 ): Promise<SkillPassport> {
   // Simulate API delay
