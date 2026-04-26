@@ -9,9 +9,10 @@ from app.services.extraction_service import extract_skills_from_text
 router = APIRouter(prefix="/workers", tags=["Workers"])
 
 
+# CREATE WORKER
 @router.post("/", response_model=WorkerResponse)
 def create_worker(worker_data: WorkerCreate, db: Session = Depends(get_db)):
-    # Create worker
+
     worker = Worker(
         name=worker_data.name,
         location=worker_data.location,
@@ -25,15 +26,20 @@ def create_worker(worker_data: WorkerCreate, db: Session = Depends(get_db)):
     # Extract skills
     skills = extract_skills_from_text(worker.raw_experience)
 
-    # Store skills
     for skill in skills:
         worker_skill = WorkerSkill(
             worker_id=worker.id,
             skill_name=skill
         )
-
         db.add(worker_skill)
 
     db.commit()
 
     return worker
+
+
+# LIST WORKERS
+@router.get("/")
+def get_workers(db: Session = Depends(get_db)):
+    workers = db.query(Worker).all()
+    return workers

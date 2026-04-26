@@ -9,9 +9,10 @@ from app.services.extraction_service import extract_skills_from_text
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 
+# CREATE JOB
 @router.post("/", response_model=JobResponse)
 def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
-    # Create job
+
     job = Job(
         title=job_data.title,
         location=job_data.location,
@@ -22,18 +23,23 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(job)
 
-    # Extract skills from job description
+    # Extract skills
     skills = extract_skills_from_text(job.description)
 
-    # Store job skills
     for skill in skills:
         job_skill = JobSkill(
             job_id=job.id,
             skill_name=skill
         )
-
         db.add(job_skill)
 
     db.commit()
 
     return job
+
+
+# LIST JOBS
+@router.get("/")
+def get_jobs(db: Session = Depends(get_db)):
+    jobs = db.query(Job).all()
+    return jobs
