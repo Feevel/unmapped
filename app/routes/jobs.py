@@ -43,3 +43,14 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
 def get_jobs(db: Session = Depends(get_db)):
     jobs = db.query(Job).all()
     return jobs
+
+@router.get("/{job_id}/skills")
+def get_job_skills(job_id: int, db: Session = Depends(get_db)):
+    skills = db.query(JobSkill).filter(
+        JobSkill.job_id == job_id
+    ).all()
+
+    return {
+        "job_id": job_id,
+        "skills": [skill.skill_name for skill in skills]
+    }

@@ -43,3 +43,14 @@ def create_worker(worker_data: WorkerCreate, db: Session = Depends(get_db)):
 def get_workers(db: Session = Depends(get_db)):
     workers = db.query(Worker).all()
     return workers
+
+@router.get("/{worker_id}/skills")
+def get_worker_skills(worker_id: int, db: Session = Depends(get_db)):
+    skills = db.query(WorkerSkill).filter(
+        WorkerSkill.worker_id == worker_id
+    ).all()
+
+    return {
+        "worker_id": worker_id,
+        "skills": [skill.skill_name for skill in skills]
+    }
