@@ -11,5 +11,10 @@ app.include_router(matches.router)
 def root():
     return {"status": "Unmapped backend running"}
 
-
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "unmapped-backend"
+    }
 
