@@ -10,6 +10,42 @@ export interface SeekerProfile {
   workDescription: string;
   activityFrequency: string;
   demographics: string; // age, sex, location combined
+  contextId?: DemoContextId;
+}
+
+export type DemoContextId =
+  | "ghana_urban_informal"
+  | "india_rural_agriculture"
+  | "kenya_mixed_services_agriculture"
+  | "bangladesh_rural_transition"
+  | "nigeria_urban_services";
+
+export interface LaborMarketSignal {
+  id: string;
+  label: string;
+  value: string | number;
+  unit?: string;
+  year?: number;
+  source: string;
+  sourceUrl?: string;
+  explanation: string;
+  trend?: "up" | "flat" | "down";
+}
+
+export interface DemoContextConfig {
+  id: DemoContextId;
+  label: string;
+  countryCode: string;
+  region: string;
+  focus: string;
+  language: string;
+  educationTaxonomy: string;
+  automationCalibration: string;
+  opportunityTypes: string[];
+  laborDataSource: string;
+  defaultLocation: string;
+  notes: string;
+  fallbackSignals: LaborMarketSignal[];
 }
 
 export interface MappedSkill {
@@ -18,6 +54,8 @@ export interface MappedSkill {
   iscoCategory: string;
   proficiencyLevel: "Basic" | "Intermediate" | "Advanced" | "Expert";
   source: string;
+  evidence?: string[];
+  confidence?: number;
 }
 
 export interface OpportunityRecommendation {
@@ -35,6 +73,25 @@ export interface AIReadinessInsight {
   recommendation: string;
 }
 
+export interface ReadinessComponent {
+  label: string;
+  score: number;
+  weight: number;
+  explanation: string;
+}
+
+export interface ReadinessAction {
+  skill: string;
+  impact: string;
+  nextStep: string;
+}
+
+export interface ReadinessBreakdown {
+  summary: string;
+  components: ReadinessComponent[];
+  actions: ReadinessAction[];
+}
+
 export interface JobListing {
   id: string;
   title: string;
@@ -47,17 +104,21 @@ export interface JobListing {
   description: string;
   postedDate: string;
   isRemote: boolean;
+  laborSignals?: LaborMarketSignal[];
 }
 
 export interface SkillPassport {
   id: string;
   generatedAt: Date;
   profile: SeekerProfile;
+  context: DemoContextConfig;
+  laborMarketSignals: LaborMarketSignal[];
   mappedSkills: MappedSkill[];
   opportunities: OpportunityRecommendation[];
   jobListings: JobListing[];
   aiInsights: AIReadinessInsight[];
   overallReadinessScore: number;
+  readinessBreakdown: ReadinessBreakdown;
 }
 
 export type ChatStep =

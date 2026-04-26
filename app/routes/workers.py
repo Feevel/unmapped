@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+import json
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -16,6 +17,7 @@ def create_worker(worker_data: WorkerCreate, db: Session = Depends(get_db)):
     worker = Worker(
         name=worker_data.name,
         location=worker_data.location,
+        country_code=worker_data.country_code or "GH",
         raw_experience=worker_data.raw_experience
     )
 
@@ -24,7 +26,10 @@ def create_worker(worker_data: WorkerCreate, db: Session = Depends(get_db)):
     db.refresh(worker)
 
     # Extract ESCO-mapped skills when available.
-    skills = extract_skill_objects_from_text(worker.raw_experience)
+    skills = extract_skill_objects_from_text(
+        worker.raw_experience,
+        assess_proficiency=True,
+    )
 
     for skill in skills:
         worker_skill = WorkerSkill(
@@ -34,6 +39,8 @@ def create_worker(worker_data: WorkerCreate, db: Session = Depends(get_db)):
             confidence=skill.get("confidence"),
             source=skill.get("source"),
             source_query=skill.get("source_query"),
+            evidence=json.dumps(skill.get("proficiency_evidence", [])),
+            proficiency_basis=skill.get("proficiency_basis"),
         )
         db.add(worker_skill)
 
@@ -63,6 +70,8 @@ def get_worker_skills(worker_id: int, db: Session = Depends(get_db)):
                 "confidence": skill.confidence,
                 "source": skill.source,
                 "source_query": skill.source_query,
+                "evidence": json.loads(skill.evidence or "[]"),
+                "proficiency_basis": skill.proficiency_basis,
             }
             for skill in skills
         ]

@@ -16,6 +16,7 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
     job = Job(
         title=job_data.title,
         location=job_data.location,
+        country_code=job_data.country_code or "GH",
         description=job_data.description
     )
 

@@ -5,7 +5,10 @@ import {
   OpportunityRecommendation,
   AIReadinessInsight,
   JobListing,
+  LaborMarketSignal,
+  ReadinessBreakdown,
 } from "./seeker-chat-types";
+import { dedupeSignals, getDemoContext } from "./demo-contexts";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
@@ -14,6 +17,7 @@ type BackendWorker = {
   id: number;
   name: string | null;
   location: string;
+  country_code?: string | null;
   raw_experience: string;
 };
 
@@ -23,6 +27,8 @@ type BackendSkill = {
   confidence?: number | null;
   source?: string | null;
   source_query?: string | null;
+  evidence?: string[];
+  proficiency_basis?: string | null;
 };
 
 type BackendMatch = {
@@ -42,7 +48,9 @@ type BackendMatch = {
   labor_signals: Array<{
     label: string;
     value: string | number;
+    unit?: string | null;
     source: string;
+    source_url?: string | null;
     year?: number | null;
     explanation?: string | null;
   }>;
@@ -96,12 +104,16 @@ export async function generateSkillPassport(
 async function generateSkillPassportFromBackend(
   profile: SeekerProfile
 ): Promise<SkillPassport> {
-  const location = parseLocationFromDemographics(profile.demographics);
+  const context = getDemoContext(profile.contextId);
+  const location =
+    parseLocationFromDemographics(profile.demographics) || context.defaultLocation;
 
   const worker = await postJson<BackendWorker>("/workers/", {
     name: profile.fullName,
     location,
+    country_code: context.countryCode,
     raw_experience: [
+      `Configured context: ${context.label}`,
       profile.workDescription,
       `Frequency: ${profile.activityFrequency}`,
       `Demographics: ${profile.demographics}`,
@@ -127,9 +139,17 @@ async function generateSkillPassportFromBackend(
     source: skill.source_query
       ? `${skill.source || "backend"}: ${skill.source_query}`
       : skill.source || "backend extraction",
+    evidence: skill.evidence || [],
+    confidence: skill.confidence || undefined,
   }));
 
-  const opportunities = matchesResponse.matches.slice(0, 3).map((match) => ({
+  const credibleMatches = matchesResponse.matches.filter(
+    (match) => match.score >= 25 || match.matched_skills.length > 0
+  );
+  const displayMatches =
+    credibleMatches.length > 0 ? credibleMatches : matchesResponse.matches.slice(0, 1);
+
+  const opportunities = displayMatches.slice(0, 3).map((match) => ({
     title: match.title,
     organization: "UNMAPPED opportunity graph",
     matchScore: Math.round(match.score),
@@ -137,39 +157,68 @@ async function generateSkillPassportFromBackend(
     location: match.location,
   }));
 
-  const jobListings = matchesResponse.matches.map((match): JobListing => ({
+  const jobListings = displayMatches.map((match): JobListing => ({
     id: `JOB-${match.job_id}`,
     title: match.title,
     company: "Local opportunity provider",
     location: match.location,
     type: "Full-time",
     salary: laborSignalSummary(match.labor_signals),
-    description: [
-      match.explanation,
-      ...match.missing_skills.slice(0, 1).map((gap) => `Next step: ${gap.next_step}`),
-    ].join(" "),
+    description: jobListingDescription(match),
     postedDate: "Backend match",
     isRemote: match.location.toLowerCase() === "remote",
     matchScore: Math.round(match.score),
     matchedSkills: match.matched_skills,
+    laborSignals: normalizeBackendSignals(match.labor_signals),
   }));
 
-  const aiInsights = buildBackendInsights(matchesResponse.matches);
-  const overallReadinessScore =
-    matchesResponse.matches.length > 0
-      ? Math.round(matchesResponse.matches[0].score)
-      : calculateReadinessScore(mappedSkills, aiInsights);
+  const laborMarketSignals = dedupeSignals(
+    matchesResponse.matches.flatMap((match) =>
+      normalizeBackendSignals(match.labor_signals)
+    )
+  );
+  const readinessBreakdown = buildReadinessBreakdown(
+    displayMatches,
+    mappedSkills,
+    laborMarketSignals.length > 0 ? laborMarketSignals : context.fallbackSignals
+  );
+  const overallReadinessScore = readinessBreakdownScore(readinessBreakdown);
+  const aiInsights = buildBackendInsights(
+    displayMatches,
+    mappedSkills,
+    readinessBreakdown
+  );
 
   return {
     id: `SP-${worker.id}`,
     generatedAt: new Date(),
     profile,
+    context,
+    laborMarketSignals:
+      laborMarketSignals.length > 0 ? laborMarketSignals : context.fallbackSignals,
     mappedSkills,
     opportunities,
     jobListings,
     aiInsights,
     overallReadinessScore,
+    readinessBreakdown,
   };
+}
+
+function normalizeBackendSignals(
+  signals: BackendMatch["labor_signals"]
+): LaborMarketSignal[] {
+  return signals.map((signal, index) => ({
+    id: `${signal.label}-${signal.year ?? index}`,
+    label: signal.label,
+    value: signal.value,
+    unit: signal.unit || undefined,
+    year: signal.year || undefined,
+    source: signal.source,
+    sourceUrl: signal.source_url || undefined,
+    explanation: signal.explanation || "Local labor market signal.",
+    trend: numericSignalValue(signal.value) == null ? "flat" : "up",
+  }));
 }
 
 function confidenceToProficiency(
@@ -185,50 +234,232 @@ function laborSignalSummary(signals: BackendMatch["labor_signals"]): string {
   if (!signals.length) return "Labor signals unavailable";
   return signals
     .slice(0, 2)
-    .map((signal) => `${signal.label}: ${signal.value}`)
+    .map((signal) => `${signal.label}: ${signal.value}${signal.unit ? ` ${signal.unit}` : ""}`)
     .join(" | ");
 }
 
-function buildBackendInsights(matches: BackendMatch[]): AIReadinessInsight[] {
+function jobListingDescription(match: BackendMatch): string {
+  const matched =
+    match.matched_skills.length > 0
+      ? `Matched skills: ${match.matched_skills.slice(0, 3).join(", ")}.`
+      : "No direct skill overlap yet.";
+  const gap = match.missing_skills[0]
+    ? `Next step: ${match.missing_skills[0].next_step}`
+    : "No major skill gap returned for this opportunity.";
+  const location =
+    match.location_score >= 100
+      ? "Location fit: same configured area."
+      : match.location_score > 0
+      ? "Location fit: possible with remote work or relocation flexibility."
+      : "Location fit: may be a barrier.";
+
+  return `${matched} ${gap} ${location}`;
+}
+
+function buildBackendInsights(
+  matches: BackendMatch[],
+  mappedSkills: MappedSkill[],
+  readinessBreakdown: ReadinessBreakdown
+): AIReadinessInsight[] {
   const bestMatch = matches[0];
   const risk = bestMatch?.automation_risk;
   const laborSignals = bestMatch?.labor_signals || [];
   const missingSkill = bestMatch?.missing_skills?.[0];
+  const strongestSkills = mappedSkills
+    .slice()
+    .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+    .slice(0, 3)
+    .map((skill) => skill.name);
 
   return [
     {
-      category: "Automation Risk",
-      riskLevel: riskLevelFromBackend(risk?.level),
-      description: risk
-        ? `${risk.source}: ${risk.calibration_note || `Exposure is ${risk.level}.`}`
-        : "Automation exposure data is not available for this match yet.",
+      category: "Why This Score",
+      riskLevel: scoreToStatus(readinessBreakdownScore(readinessBreakdown)),
+      description: readinessBreakdown.summary,
       recommendation:
-        missingSkill?.next_step ||
-        "Keep building evidence for durable hands-on and interpersonal skills.",
+        readinessBreakdown.actions[0]?.nextStep ||
+        "The profile has enough evidence for a first-pass match. Add more task examples to make the passport stronger.",
     },
     {
-      category: "Labor Market Signals",
-      riskLevel: "Low",
+      category: "Automation Durability",
+      riskLevel: riskLevelFromBackend(risk?.level),
+      description: risk
+        ? `For the closest matched opportunity, automation exposure is ${risk.level}. ${risk.calibration_note || ""}`
+        : "Automation exposure data is not available for this match yet.",
+      recommendation:
+        "Improve readiness by documenting durable evidence: customer trust, local coordination, troubleshooting, creative judgment, or hands-on work.",
+    },
+    {
+      category: "Local Labor Context",
+      riskLevel: scoreToStatus(
+        readinessBreakdown.components.find((component) => component.label === "Local labor context")?.score || 0
+      ),
       description: laborSignals.length
         ? laborSignals
             .slice(0, 2)
-            .map((signal) => `${signal.label}: ${signal.value}`)
-            .join(" ")
+            .map((signal) => `${signal.label}: ${signal.value}${signal.unit ? ` ${signal.unit}` : ""}`)
+            .join(" | ")
         : "No labor market signals were returned for this profile.",
       recommendation:
         laborSignals[0]?.explanation ||
         "Compare opportunities using both fit score and local market signals.",
     },
     {
-      category: "Skill Gaps",
+      category: "Best Next Skills",
       riskLevel: missingSkill ? "Medium" : "Low",
       description: missingSkill
-        ? `The strongest next gap is ${missingSkill.skill}.`
-        : "The top match did not return missing skills.",
+        ? `The closest opportunity would score higher with stronger evidence for ${missingSkill.skill}.`
+        : `The strongest profile signals are ${strongestSkills.join(", ") || "not available yet"}.`,
       recommendation:
         missingSkill?.next_step || "Use the matched skills as portable evidence.",
     },
   ];
+}
+
+function buildReadinessBreakdown(
+  matches: BackendMatch[],
+  mappedSkills: MappedSkill[],
+  laborMarketSignals: LaborMarketSignal[]
+): ReadinessBreakdown {
+  const bestMatch = matches[0];
+  const opportunityFit = Math.round(bestMatch?.score || 0);
+  const skillEvidence = Math.round(averageSkillConfidence(mappedSkills) * 100);
+  const localContext = Math.round(localContextScore(laborMarketSignals, bestMatch));
+  const automationResilience = Math.round(
+    bestMatch?.automation_risk ? (1 - bestMatch.automation_risk.score) * 100 : 55
+  );
+
+  const components = [
+    {
+      label: "Opportunity fit",
+      score: opportunityFit,
+      weight: 40,
+      explanation: bestMatch
+        ? `Best reachable match is ${bestMatch.title} at ${Math.round(bestMatch.score)}%, based on skill overlap and location fit.`
+        : "No matching opportunities were available in this configured country.",
+    },
+    {
+      label: "Skill evidence",
+      score: skillEvidence,
+      weight: 30,
+      explanation: mappedSkills.length
+        ? `The profile has ${mappedSkills.length} mapped skill(s); confidence is based on concrete evidence from the answers.`
+        : "The profile needs more concrete task evidence before the system can trust the skill signal.",
+    },
+    {
+      label: "Local labor context",
+      score: localContext,
+      weight: 20,
+      explanation: localContextExplanation(laborMarketSignals),
+    },
+    {
+      label: "Automation resilience",
+      score: automationResilience,
+      weight: 10,
+      explanation: bestMatch?.automation_risk
+        ? `Closest opportunity has ${bestMatch.automation_risk.level} automation exposure; durable human skills keep this component from falling to zero.`
+        : "Automation data is not available, so this component uses a cautious default.",
+    },
+  ];
+
+  const score = readinessBreakdownScore({ summary: "", components, actions: [] });
+  const actions = readinessActions(matches, mappedSkills);
+  const bestTitle = bestMatch?.title || "the current local opportunity set";
+
+  return {
+    summary: `Your readiness is ${score}% because your strongest current path is ${bestTitle}. The score combines match quality, evidence strength, local labor signals, and automation resilience.`,
+    components,
+    actions,
+  };
+}
+
+function readinessBreakdownScore(breakdown: ReadinessBreakdown): number {
+  const weighted = breakdown.components.reduce(
+    (sum, component) => sum + component.score * (component.weight / 100),
+    0
+  );
+  return Math.round(Math.max(0, Math.min(100, weighted)));
+}
+
+function averageSkillConfidence(skills: MappedSkill[]): number {
+  if (!skills.length) return 0.15;
+  const total = skills.reduce((sum, skill) => sum + (skill.confidence ?? 0.55), 0);
+  return Math.max(0.15, Math.min(0.95, total / skills.length));
+}
+
+function localContextScore(
+  signals: LaborMarketSignal[],
+  bestMatch?: BackendMatch
+): number {
+  const title = `${bestMatch?.title || ""}`.toLowerCase();
+  const preferredLabel = title.includes("agric")
+    ? "agriculture"
+    : title.includes("software") || title.includes("ict") || title.includes("support")
+    ? "services"
+    : "";
+  const preferred = signals.find((signal) =>
+    signal.label.toLowerCase().includes(preferredLabel)
+  );
+  const internet = signals.find((signal) =>
+    signal.label.toLowerCase().includes("internet")
+  );
+  const wage = signals.find((signal) =>
+    signal.label.toLowerCase().includes("wage")
+  );
+
+  const preferredValue = numericSignalValue(preferred?.value ?? "") ?? 35;
+  const internetValue = numericSignalValue(internet?.value ?? "") ?? 40;
+  const wageValue = numericSignalValue(wage?.value ?? "") ?? 25;
+
+  return Math.max(
+    20,
+    Math.min(90, preferredValue * 0.5 + internetValue * 0.25 + wageValue * 0.25)
+  );
+}
+
+function localContextExplanation(signals: LaborMarketSignal[]): string {
+  const signalText = signals
+    .slice(0, 2)
+    .map((signal) => `${signal.label} is ${signal.value}${signal.unit ? ` ${signal.unit}` : ""}`)
+    .join("; ");
+  return signalText
+    ? `${signalText}. These signals adjust the score toward opportunities that are realistic in the selected country.`
+    : "No local labor signals were available, so the score uses a cautious default.";
+}
+
+function readinessActions(
+  matches: BackendMatch[],
+  mappedSkills: MappedSkill[]
+): ReadinessBreakdown["actions"] {
+  const gaps = matches.flatMap((match) => match.missing_skills);
+  const uniqueGaps = gaps.filter(
+    (gap, index, list) => list.findIndex((item) => item.skill === gap.skill) === index
+  );
+  const actions = uniqueGaps.slice(0, 3).map((gap) => ({
+    skill: gap.skill,
+    impact:
+      gap.importance === "required"
+        ? "High impact: required by at least one close opportunity."
+        : "Medium impact: would improve a close opportunity match.",
+    nextStep: gap.next_step,
+  }));
+
+  if (mappedSkills.length < 3) {
+    actions.push({
+      skill: "More skill evidence",
+      impact: "High impact: makes the passport and score more reliable.",
+      nextStep:
+        "Add examples with tools used, customers served, products built, frequency, and years of experience.",
+    });
+  }
+
+  return actions.slice(0, 3);
+}
+
+function scoreToStatus(score: number): AIReadinessInsight["riskLevel"] {
+  if (score >= 70) return "Low";
+  if (score >= 45) return "Medium";
+  return "High";
 }
 
 function riskLevelFromBackend(
@@ -248,9 +479,11 @@ async function generateMockSkillPassport(
 
   // Extract skills based on work description (mock extraction)
   const mappedSkills = extractSkillsFromDescription(profile.workDescription);
+  const context = getDemoContext(profile.contextId);
 
   // Parse location from demographics for opportunities
-  const location = parseLocationFromDemographics(profile.demographics);
+  const location =
+    parseLocationFromDemographics(profile.demographics) || context.defaultLocation;
 
   // Generate opportunity recommendations
   const opportunities = generateOpportunities(mappedSkills, location);
@@ -262,24 +495,89 @@ async function generateMockSkillPassport(
   const aiInsights = generateAIInsights(mappedSkills);
 
   // Calculate overall readiness score
-  const overallReadinessScore = calculateReadinessScore(mappedSkills, aiInsights);
+  const readinessBreakdown = buildMockReadinessBreakdown(
+    mappedSkills,
+    jobListings,
+    context.fallbackSignals
+  );
+  const overallReadinessScore = readinessBreakdownScore(readinessBreakdown);
 
   return {
     id: `SP-${Date.now()}`,
     generatedAt: new Date(),
     profile,
+    context,
+    laborMarketSignals: context.fallbackSignals,
     mappedSkills,
     opportunities,
     jobListings,
     aiInsights,
     overallReadinessScore,
+    readinessBreakdown,
+  };
+}
+
+function buildMockReadinessBreakdown(
+  skills: MappedSkill[],
+  jobs: JobListing[],
+  signals: LaborMarketSignal[]
+): ReadinessBreakdown {
+  const bestJob = jobs[0];
+  const components = [
+    {
+      label: "Opportunity fit",
+      score: bestJob?.matchScore || 25,
+      weight: 40,
+      explanation: bestJob
+        ? `Best offline-demo match is ${bestJob.title} at ${bestJob.matchScore}%.`
+        : "No offline-demo jobs matched the profile.",
+    },
+    {
+      label: "Skill evidence",
+      score: Math.round(averageSkillConfidence(skills) * 100),
+      weight: 30,
+      explanation: `The offline fallback found ${skills.length} skill signal(s).`,
+    },
+    {
+      label: "Local labor context",
+      score: Math.round(localContextScore(signals)),
+      weight: 20,
+      explanation: localContextExplanation(signals),
+    },
+    {
+      label: "Automation resilience",
+      score: 55,
+      weight: 10,
+      explanation:
+        "Offline fallback uses a cautious default because occupation-level automation data was not returned.",
+    },
+  ];
+
+  return {
+    summary:
+      "This offline fallback score combines job fit, skill evidence, local labor signals, and a cautious automation default.",
+    components,
+    actions: [
+      {
+        skill: "More task evidence",
+        impact: "High impact: improves skill confidence.",
+        nextStep:
+          "Add examples with tools used, customers served, products built, frequency, and years of experience.",
+      },
+    ],
   };
 }
 
 function parseLocationFromDemographics(demographics: string): string {
   // Simple extraction - in production this would be more sophisticated
   const parts = demographics.split(",").map((p) => p.trim());
-  return parts[parts.length - 1] || "Your Region";
+  return parts[parts.length - 1] || "";
+}
+
+function numericSignalValue(value: string | number): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function extractSkillsFromDescription(description: string): MappedSkill[] {

@@ -8,6 +8,7 @@ class Worker(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=True)
     location = Column(String, nullable=False)
+    country_code = Column(String, nullable=True)
     raw_experience = Column(Text, nullable=False)
 
 
@@ -17,6 +18,7 @@ class Job(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
     location = Column(String, nullable=False)
+    country_code = Column(String, nullable=True)
     description = Column(Text, nullable=False)
 
 
@@ -30,6 +32,8 @@ class WorkerSkill(Base):
     confidence = Column(Float, nullable=True)
     source = Column(String, nullable=True)
     source_query = Column(String, nullable=True)
+    evidence = Column(Text, nullable=True)
+    proficiency_basis = Column(Text, nullable=True)
 
 
 class JobSkill(Base):

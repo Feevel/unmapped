@@ -3,10 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -15,13 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  FieldGroup,
-  Field,
-  FieldLabel,
-} from "@/components/ui/field";
 import {
   ArrowLeft,
   Users,
@@ -35,10 +27,9 @@ import {
   Target,
   Star,
   UserCheck,
-  Filter,
-  Mail,
-  Lock,
-  LogIn,
+  Search,
+  ShieldCheck,
+  Globe2,
 } from "lucide-react";
 import {
   Institution,
@@ -75,39 +66,16 @@ function getScoreColor(score: number) {
 }
 
 export default function InstitutionDashboard() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-
   const [institution, setInstitution] = useState<Institution | null>(null);
   const [listings, setListings] = useState<InstitutionJobListing[]>([]);
   const [candidateMatches, setCandidateMatches] = useState<CandidateMatch[]>([]);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [selectedListing, setSelectedListing] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError("");
-    setIsLoggingIn(true);
-
-    // Mock login validation
-    await new Promise((resolve) => setTimeout(resolve, 800));
-
-    if (email && password) {
-      // Mock successful login - in production this would validate against a backend
-      setIsLoggedIn(true);
-    } else {
-      setLoginError("Please enter both email and password.");
-    }
-    setIsLoggingIn(false);
-  };
 
   useEffect(() => {
     async function loadData() {
-      if (!isLoggedIn) return;
       setIsLoading(true);
       const [instData, listingsData, matchesData, metricsData] = await Promise.all([
         getInstitution(),
@@ -122,7 +90,7 @@ export default function InstitutionDashboard() {
       setIsLoading(false);
     }
     loadData();
-  }, [isLoggedIn]);
+  }, []);
 
   useEffect(() => {
     async function filterMatches() {
@@ -137,86 +105,20 @@ export default function InstitutionDashboard() {
     filterMatches();
   }, [selectedListing]);
 
-  // Login Screen
-  if (!isLoggedIn) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-              <Building2 className="h-6 w-6 text-primary" />
-            </div>
-            <CardTitle className="text-2xl">Institution Login</CardTitle>
-            <CardDescription>
-              Sign in to access your organization dashboard
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleLogin}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="email">Email Address</FieldLabel>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="you@organization.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="password"
-                      type="password"
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </Field>
-              </FieldGroup>
-
-              {loginError && (
-                <p className="mt-4 text-sm text-destructive">{loginError}</p>
-              )}
-
-              <Button
-                type="submit"
-                className="mt-6 w-full gap-2"
-                disabled={isLoggingIn}
-              >
-                {isLoggingIn ? (
-                  <>
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-background border-t-transparent" />
-                    Signing in...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="h-4 w-4" />
-                    Sign In
-                  </>
-                )}
-              </Button>
-            </form>
-
-            <div className="mt-6 text-center">
-              <Button asChild variant="link" className="text-sm text-muted-foreground">
-                <Link href="/">Back to Home</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const filteredCandidateMatches = candidateMatches.filter((match) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return [
+      match.candidate.fullName,
+      match.candidate.location,
+      match.candidate.workDescription,
+      match.listingTitle,
+      ...match.candidate.mappedSkills.map((skill) => skill.name),
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
+  });
 
   if (isLoading) {
     return (
@@ -243,20 +145,53 @@ export default function InstitutionDashboard() {
             </Button>
             <div className="h-6 w-px bg-border" />
             <div>
-              <h1 className="text-xl font-bold">{institution?.name}</h1>
+              <h1 className="text-xl font-bold">Employer Talent Console</h1>
               <p className="text-sm text-muted-foreground">
-                {institution?.type} - {institution?.industry}
+                {institution?.name} - {institution?.industry}
               </p>
             </div>
           </div>
-          <Badge variant="outline" className="gap-1.5">
-            <MapPin className="h-3.5 w-3.5" />
-            {institution?.location}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="gap-1.5">
+              <MapPin className="h-3.5 w-3.5" />
+              {institution?.location}
+            </Badge>
+            <Badge variant="secondary" className="gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Mock employer view
+            </Badge>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        <div className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div>
+            <h2 className="text-3xl font-bold">Potential employees</h2>
+            <p className="mt-2 max-w-3xl text-muted-foreground">
+              Browse portable skill passports, compare candidates against local
+              opportunities, and identify the skill gaps that a training partner
+              could close before placement.
+            </p>
+          </div>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-primary/10 p-2">
+                  <Globe2 className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium">Configured market</p>
+                  <p className="text-sm text-muted-foreground">
+                    Kenya employer demo with portable ESCO-style skill profiles
+                    and explainable match scores.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Metrics Overview */}
         <div className="mb-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
@@ -338,11 +273,19 @@ export default function InstitutionDashboard() {
               <div>
                 <h2 className="text-2xl font-bold">Candidate Skill Passports</h2>
                 <p className="text-muted-foreground">
-                  View job seekers and their compatibility with your listings
+                  Ranked potential employees with visible skills, gaps, and local fit
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <Filter className="h-4 w-4 text-muted-foreground" />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search skills or location"
+                    className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-60"
+                  />
+                </div>
                 <Select value={selectedListing} onValueChange={setSelectedListing}>
                   <SelectTrigger className="w-[250px]">
                     <SelectValue placeholder="Filter by listing" />
@@ -360,7 +303,7 @@ export default function InstitutionDashboard() {
             </div>
 
             <div className="grid gap-4">
-              {candidateMatches.map((match) => (
+              {filteredCandidateMatches.map((match) => (
                 <Card key={`${match.candidate.id}-${match.listingId}`} className="overflow-hidden">
                   <CardContent className="p-0">
                     <div className="flex flex-col lg:flex-row">
@@ -388,6 +331,25 @@ export default function InstitutionDashboard() {
                           {match.candidate.workDescription}
                         </p>
 
+                        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                          <div className="rounded-md bg-muted/40 p-3">
+                            <p className="text-xs text-muted-foreground">Passport</p>
+                            <p className="text-sm font-medium">{match.candidate.id}</p>
+                          </div>
+                          <div className="rounded-md bg-muted/40 p-3">
+                            <p className="text-xs text-muted-foreground">Readiness</p>
+                            <p className="text-sm font-medium">
+                              {match.candidate.overallReadinessScore}%
+                            </p>
+                          </div>
+                          <div className="rounded-md bg-muted/40 p-3">
+                            <p className="text-xs text-muted-foreground">Frequency</p>
+                            <p className="text-sm font-medium">
+                              {match.candidate.activityFrequency}
+                            </p>
+                          </div>
+                        </div>
+
                         <div className="mb-4">
                           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                             Skills
@@ -412,7 +374,7 @@ export default function InstitutionDashboard() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-4 text-sm">
+                        <div className="flex flex-wrap items-center gap-4 text-sm">
                           <div className="flex items-center gap-1.5">
                             <Award className="h-4 w-4 text-primary" />
                             <span>Readiness: {match.candidate.overallReadinessScore}%</span>
@@ -465,7 +427,7 @@ export default function InstitutionDashboard() {
                         </div>
 
                         <Button className="mt-4 gap-2">
-                          View Full Passport
+                          Review Candidate
                           <ChevronRight className="h-4 w-4" />
                         </Button>
                       </div>

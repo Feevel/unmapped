@@ -9,6 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Send,
   Bot,
   User,
@@ -22,6 +29,8 @@ import {
   Clock,
   Building2,
   ExternalLink,
+  Globe2,
+  Database,
 } from "lucide-react";
 import {
   Message,
@@ -29,8 +38,11 @@ import {
   SkillPassport,
   ChatStep,
   CHAT_QUESTIONS,
+  DemoContextId,
+  LaborMarketSignal,
 } from "@/lib/seeker-chat-types";
 import { generateSkillPassport } from "@/lib/seeker-mock-api";
+import { DEFAULT_CONTEXT_ID, DEMO_CONTEXTS, getDemoContext } from "@/lib/demo-contexts";
 
 const STEP_ORDER: ChatStep[] = [
   "name",
@@ -44,7 +56,11 @@ export function SeekerChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [currentStep, setCurrentStep] = useState<ChatStep>("name");
-  const [profile, setProfile] = useState<Partial<SeekerProfile>>({});
+  const [selectedContextId, setSelectedContextId] =
+    useState<DemoContextId>(DEFAULT_CONTEXT_ID);
+  const [profile, setProfile] = useState<Partial<SeekerProfile>>({
+    contextId: DEFAULT_CONTEXT_ID,
+  });
   const [skillPassport, setSkillPassport] = useState<SkillPassport | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -53,6 +69,7 @@ export function SeekerChat() {
 
   const progressPercentage =
     (STEP_ORDER.indexOf(currentStep) / (STEP_ORDER.length - 1)) * 100;
+  const selectedContext = getDemoContext(selectedContextId);
 
   useEffect(() => {
     // Initial bot message - only run once
@@ -130,13 +147,21 @@ export function SeekerChat() {
   const handleGeneratePassport = async () => {
     setIsGenerating(true);
     try {
-      const passport = await generateSkillPassport(profile as SeekerProfile);
+      const passport = await generateSkillPassport({
+        ...(profile as SeekerProfile),
+        contextId: selectedContextId,
+      });
       setSkillPassport(passport);
     } catch (error) {
       console.error("Error generating skill passport:", error);
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleContextChange = (value: DemoContextId) => {
+    setSelectedContextId(value);
+    setProfile((current) => ({ ...current, contextId: value }));
   };
 
   const getRiskColor = (level: "Low" | "Medium" | "High") => {
@@ -207,6 +232,128 @@ export function SeekerChat() {
           </CardContent>
         </Card>
 
+        {/* Readiness Explanation */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Why Your Readiness Score Is {skillPassport.overallReadinessScore}%
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {skillPassport.readinessBreakdown.summary}
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-2">
+              {skillPassport.readinessBreakdown.components.map((component) => (
+                <div key={component.label} className="rounded-lg border p-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{component.label}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Weight: {component.weight}%
+                      </p>
+                    </div>
+                    <p className="text-xl font-bold text-primary">
+                      {component.score}%
+                    </p>
+                  </div>
+                  <Progress value={component.score} className="h-2" />
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {component.explanation}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {skillPassport.readinessBreakdown.actions.length > 0 && (
+              <div className="mt-4 rounded-lg border p-4">
+                <p className="text-sm font-medium">How to raise this score</p>
+                <div className="mt-3 grid gap-3 md:grid-cols-3">
+                  {skillPassport.readinessBreakdown.actions.map((action) => (
+                    <div key={action.skill} className="rounded-md bg-muted/40 p-3">
+                      <p className="text-sm font-medium">{action.skill}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {action.impact}
+                      </p>
+                      <p className="mt-2 text-xs">{action.nextStep}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Configured Context */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Globe2 className="h-5 w-5" />
+              Configured Context
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Demo context</p>
+                <p className="font-semibold">{skillPassport.context.label}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {skillPassport.context.region}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Config inputs</p>
+                <p className="text-sm">
+                  {skillPassport.context.educationTaxonomy}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Language: {skillPassport.context.language}
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Opportunity types</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {skillPassport.context.opportunityTypes.map((type) => (
+                    <Badge key={type} variant="outline" className="text-xs">
+                      {type}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
+              {skillPassport.context.notes}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Labor Market Signals */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Local Labor Market Signals
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Visible econometric signals used to ground the match in this region
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-3">
+              {skillPassport.laborMarketSignals.slice(0, 6).map((signal) => (
+                <SignalCard key={signal.id} signal={signal} />
+              ))}
+            </div>
+            <div className="mt-4 rounded-lg border p-4">
+              <p className="text-sm font-medium">Automation calibration</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {skillPassport.context.automationCalibration}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Mapped Skills */}
         <Card>
           <CardHeader>
@@ -230,6 +377,16 @@ export function SeekerChat() {
                     <p className="text-xs text-muted-foreground">
                       ESCO: {skill.escoCode}
                     </p>
+                    {skill.confidence != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Confidence: {Math.round(skill.confidence * 100)}%
+                      </p>
+                    )}
+                    {skill.evidence && skill.evidence.length > 0 && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Evidence: {skill.evidence.slice(0, 2).join("; ")}
+                      </p>
+                    )}
                   </div>
                   <Badge variant="secondary">{skill.proficiencyLevel}</Badge>
                 </div>
@@ -382,7 +539,7 @@ export function SeekerChat() {
                     <p className="font-medium">{insight.category}</p>
                     <Badge className={getRiskColor(insight.riskLevel)}>
                       {getRiskIcon(insight.riskLevel)}
-                      <span className="ml-1">{insight.riskLevel} Risk</span>
+                      <span className="ml-1">{insightStatusLabel(insight)}</span>
                     </Badge>
                   </div>
                   <p className="mb-2 text-sm text-muted-foreground">
@@ -407,7 +564,7 @@ export function SeekerChat() {
             setSkillPassport(null);
             setMessages([]);
             setCurrentStep("name");
-            setProfile({});
+            setProfile({ contextId: selectedContextId });
             hasInitialized.current = false;
             setTimeout(() => {
               if (!hasInitialized.current) {
@@ -427,6 +584,40 @@ export function SeekerChat() {
     <div className="flex h-[calc(100vh-12rem)] flex-col rounded-lg border bg-card">
       {/* Progress Header */}
       <div className="border-b p-4">
+        <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_18rem] md:items-start">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Globe2 className="h-4 w-4" />
+              Local labor market configuration
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {selectedContext.region}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Badge variant="secondary" className="text-xs">
+                {selectedContext.countryCode}
+              </Badge>
+              <Badge variant="outline" className="text-xs">
+                {selectedContext.language}
+              </Badge>
+              <Badge variant="outline" className="text-xs">
+                World Bank labor signals
+              </Badge>
+            </div>
+          </div>
+          <Select value={selectedContextId} onValueChange={handleContextChange}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select context" />
+            </SelectTrigger>
+            <SelectContent>
+              {DEMO_CONTEXTS.map((context) => (
+                <SelectItem key={context.id} value={context.id}>
+                  {context.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="mb-2 flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Onboarding Progress</span>
           <span className="font-medium">{Math.round(progressPercentage)}%</span>
@@ -531,4 +722,72 @@ export function SeekerChat() {
       </div>
     </div>
   );
+}
+
+function insightStatusLabel(insight: {
+  category: string;
+  riskLevel: "Low" | "Medium" | "High";
+}) {
+  if (insight.category === "Automation Durability") {
+    return `${insight.riskLevel} exposure`;
+  }
+  if (insight.riskLevel === "Low") return "Strong";
+  if (insight.riskLevel === "Medium") return "Developing";
+  return "Needs evidence";
+}
+
+function SignalCard({ signal }: { signal: LaborMarketSignal }) {
+  const numericValue = numericSignalValue(signal.value);
+  const barValue = numericValue == null ? null : Math.max(0, Math.min(numericValue, 100));
+
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <p className="text-sm font-medium leading-snug">{signal.label}</p>
+        {signal.year && (
+          <Badge variant="secondary" className="text-xs">
+            {signal.year}
+          </Badge>
+        )}
+      </div>
+      <p className="text-2xl font-bold text-primary">
+        {signalValueText(signal)}
+      </p>
+      {barValue != null && (
+        <div className="mt-3">
+          <Progress value={barValue} className="h-2" />
+        </div>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        {signal.explanation}
+      </p>
+      <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span>{signal.source}</span>
+        {signal.sourceUrl && (
+          <a
+            href={signal.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-primary hover:underline"
+          >
+            Source
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function signalValueText(signal: LaborMarketSignal): string {
+  if (typeof signal.value === "number") {
+    return `${signal.value.toFixed(2)}${signal.unit ? ` ${signal.unit}` : ""}`;
+  }
+  return `${signal.value}${signal.unit ? ` ${signal.unit}` : ""}`;
+}
+
+function numericSignalValue(value: string | number): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
 }

@@ -76,6 +76,7 @@ class LaborSignalNode(BaseModel):
     value: float | str
     unit: str | None = None
     source: str
+    source_url: str | None = None
     year: int | None = None
     country_code: str | None = None
     sector_id: str | None = None

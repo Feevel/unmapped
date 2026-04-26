@@ -9,10 +9,20 @@ SKILL_METADATA_COLUMNS = [
     ("confidence", "FLOAT"),
     ("source", "VARCHAR"),
     ("source_query", "VARCHAR"),
+    ("evidence", "TEXT"),
+    ("proficiency_basis", "TEXT"),
 ]
 
 JOB_SKILL_METADATA_COLUMNS = SKILL_METADATA_COLUMNS + [
     ("importance", "VARCHAR"),
+]
+
+WORKER_METADATA_COLUMNS = [
+    ("country_code", "VARCHAR"),
+]
+
+JOB_METADATA_COLUMNS = [
+    ("country_code", "VARCHAR"),
 ]
 
 def _existing_columns(table_name: str) -> set[str]:
@@ -20,6 +30,20 @@ def _existing_columns(table_name: str) -> set[str]:
 
 
 with engine.begin() as conn:
+    workers_columns = _existing_columns("workers")
+    for column_name, column_type in WORKER_METADATA_COLUMNS:
+        if column_name not in workers_columns:
+            conn.execute(text(
+                f"ALTER TABLE workers ADD COLUMN {column_name} {column_type}"
+            ))
+
+    jobs_table_columns = _existing_columns("jobs")
+    for column_name, column_type in JOB_METADATA_COLUMNS:
+        if column_name not in jobs_table_columns:
+            conn.execute(text(
+                f"ALTER TABLE jobs ADD COLUMN {column_name} {column_type}"
+            ))
+
     worker_columns = _existing_columns("worker_skills")
     for column_name, column_type in SKILL_METADATA_COLUMNS:
         if column_name not in worker_columns:

@@ -14,7 +14,11 @@ Imports from graph/ (the canonical implementation) not app/graph/.
 
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
+
 from sqlalchemy.orm import Session
 
 from app.models import Worker, WorkerSkill, Job, JobSkill
@@ -222,7 +226,13 @@ def get_matches_for_worker(worker_id: int, db: Session) -> list[dict]:
     graphs = [worker_graph]
     jobs_by_id: dict[str, Job] = {}
 
+    worker_country_code = getattr(worker, "country_code", None) or "GH"
+
     for job in db.query(Job).all():
+        job_country_code = getattr(job, "country_code", None) or "GH"
+        if job_country_code != worker_country_code:
+            continue
+
         job_skills = db.query(JobSkill).filter(JobSkill.job_id == job.id).all()
         if not job_skills:
             continue
@@ -284,7 +294,9 @@ def get_matches_for_worker(worker_id: int, db: Session) -> list[dict]:
                 {
                     "label":       sig.label,
                     "value":       sig.value,
+                    "unit":        sig.unit,
                     "source":      sig.source,
+                    "source_url":  sig.source_url,
                     "year":        sig.year,
                     "explanation": sig.explanation,
                 }
@@ -309,58 +321,27 @@ def get_matches_for_worker(worker_id: int, db: Session) -> list[dict]:
 
 def _load_labor_signals(job: Job, db: Session) -> list[LaborSignalNode]:
     """
-    Return visible demo labor signals for this job's sector/occupation.
-    Part 3 can replace this with real DB queries while preserving the API shape.
+    Return real seeded labor signals for this job's country/sector.
     """
+    country_code = getattr(job, "country_code", "GH")
     sector_id = _infer_sector_id(job)
-    title = job.title.lower()
-
-    if "agric" in title or "crop" in title or "farm" in title:
-        return [
-            LaborSignalNode(
-                signal_id=f"gh_{sector_id}_agriculture_employment",
-                label="Employment by sector",
-                value="Agriculture remains a major youth employment sector",
-                source="ILO ILOSTAT / World Bank WDI demo signal",
-                year=2024,
-                country_code="GH",
-                sector_id=sector_id,
-                explanation="Shows why nearby agricultural pathways are realistic rather than aspirational.",
-            ),
-            LaborSignalNode(
-                signal_id=f"gh_{sector_id}_informality",
-                label="Informal employment exposure",
-                value="High",
-                source="ILOSTAT informality demo signal",
-                year=2024,
-                country_code="GH",
-                sector_id=sector_id,
-                explanation="Flags that many opportunities may be informal or mixed formal/informal.",
-            ),
-        ]
-
-    return [
-        LaborSignalNode(
-            signal_id=f"gh_{sector_id}_digital_services_growth",
-            label="Digital services opportunity",
-            value="Growing local demand",
-            source="World Bank WDI / ITU demo signal",
-            year=2024,
-            country_code="GH",
-            sector_id=sector_id,
-            explanation="Connects repair and ICT support skills to reachable local service work.",
-        ),
-        LaborSignalNode(
-            signal_id=f"gh_{sector_id}_wage_employment_share",
-            label="Wage and salaried employment share",
-            value="Visible labor market constraint",
-            source="ILO modelled estimate demo signal",
-            year=2024,
-            country_code="GH",
-            sector_id=sector_id,
-            explanation="Reminds users that formal wage jobs are only one part of the opportunity landscape.",
-        ),
+    rows = [
+        row
+        for row in _labor_signal_seed_rows()
+        if row.get("country_code") == country_code
+        and row.get("sector_id") in (None, sector_id)
     ]
+
+    # Prefer the sector-specific signal plus the two broad context signals.
+    rows = sorted(rows, key=lambda row: row.get("sector_id") is None)
+    return [LaborSignalNode(**row) for row in rows[:3]]
+
+
+@lru_cache(maxsize=1)
+def _labor_signal_seed_rows() -> tuple[dict, ...]:
+    path = Path(__file__).resolve().parents[2] / "data" / "labor_signals.json"
+    with open(path, "r", encoding="utf-8") as f:
+        return tuple(json.load(f))
 
 
 def _load_automation_risk(job: Job, db: Session) -> AutomationRiskNode | None:
@@ -412,7 +393,7 @@ def _infer_sector_id(job: Job) -> str:
     text = f"{job.title} {job.description}".lower()
     if any(word in text for word in ["agric", "crop", "farm", "harvest"]):
         return "agriculture"
-    if any(word in text for word in ["phone", "mobile", "ict", "software", "technical"]):
+    if any(word in text for word in ["phone", "mobile", "ict", "software", "technical", "website"]):
         return "ict_services"
     return "general_services"
 
@@ -425,6 +406,8 @@ def _infer_occupation_id(job: Job) -> str:
     text = f"{job.title} {job.description}".lower()
     if any(word in text for word in ["phone", "mobile", "repair"]):
         return "isco_7422"
+    if any(word in text for word in ["software", "website", "programming"]):
+        return "isco_2512"
     if any(word in text for word in ["ict", "technical support", "help desk"]):
         return "isco_3512"
     if any(word in text for word in ["agric", "crop", "farm", "field"]):
