@@ -36,6 +36,7 @@ def create_worker_graph(
         profile.worker.worker_id,
         location.location_id,
         edge_type="LOCATED_IN",
+        willing_to_relocate=profile.willing_to_relocate,
     )
 
     for skill_edge in profile.skills:
@@ -79,7 +80,12 @@ def create_job_graph(
         node_type="location",
         **location.model_dump(),
     )
-    graph.add_edge(post.job.job_id, location.location_id, edge_type="BASED_IN")
+    graph.add_edge(
+        post.job.job_id,
+        location.location_id,
+        edge_type="BASED_IN",
+        remote_ok=post.remote_ok,
+    )
 
     if sector:
         graph.add_node(sector.sector_id, node_type="sector", **sector.model_dump())

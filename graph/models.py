@@ -111,11 +111,13 @@ class JobSkillEdge(BaseModel):
 class WorkerProfile(BaseModel):
     worker: WorkerNode
     skills: list[WorkerSkillEdge]
+    willing_to_relocate: bool = False
 
 
 class JobPost(BaseModel):
     job: JobNode
     skills: list[JobSkillEdge]
+    remote_ok: bool = False
 
 
 class SkillGapRecommendation(BaseModel):

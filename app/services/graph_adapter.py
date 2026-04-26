@@ -120,6 +120,7 @@ def _build_worker_profile(
             location_id=location_id,
             education_level=getattr(worker, "education_level", None),
         ),
+        willing_to_relocate=getattr(worker, "willing_to_relocate", False),
         skills=[
             WorkerSkillEdge(
                 worker_id=_worker_node_id(worker.id),
@@ -172,6 +173,7 @@ def _build_job_post(
             occupation_id=getattr(job, "isco_code", None),
             opportunity_type=getattr(job, "opportunity_type", "formal_employment"),
         ),
+        remote_ok=getattr(job, "remote_ok", _infer_remote_ok(job)),
         skills=[
             JobSkillEdge(
                 job_id=_job_node_id(job.id),
@@ -428,3 +430,8 @@ def _infer_occupation_id(job: Job) -> str:
     if any(word in text for word in ["agric", "crop", "farm", "field"]):
         return "isco_3142"
     return "isco_unknown"
+
+
+def _infer_remote_ok(job: Job) -> bool:
+    text = f"{job.title} {job.description}".lower()
+    return any(word in text for word in ["remote", "help desk", "online support"])

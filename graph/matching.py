@@ -20,6 +20,9 @@ class ScoringConfig:
     required_weight: float = 1.0
     preferred_weight: float = 0.5
     score_threshold: float = 0.0
+    location_exact: float = 1.0
+    location_flexible: float = 0.5
+    location_mismatch: float = 0.0
 
 
 def _out_edges_by_type(graph: nx.DiGraph, node_id: str, edge_type: str) -> dict[str, dict]:
@@ -30,11 +33,15 @@ def _out_edges_by_type(graph: nx.DiGraph, node_id: str, edge_type: str) -> dict[
     }
 
 
-def _first_target_by_type(graph: nx.DiGraph, node_id: str, edge_type: str) -> str | None:
+def _first_target_by_type(
+    graph: nx.DiGraph,
+    node_id: str,
+    edge_type: str,
+) -> tuple[str | None, dict]:
     for _, target, data in graph.out_edges(node_id, data=True):
         if data.get("edge_type") == edge_type:
-            return target
-    return None
+            return target, data
+    return None, {}
 
 
 def _score_skills(
@@ -63,22 +70,31 @@ def _score_skills(
     return earned / possible, matched, gaps
 
 
-def _score_location(graph: nx.DiGraph, worker_id: str, job_id: str) -> float:
-    worker_location = _first_target_by_type(graph, worker_id, "LOCATED_IN")
-    job_location = _first_target_by_type(graph, job_id, "BASED_IN")
+def _score_location(
+    graph: nx.DiGraph,
+    worker_id: str,
+    job_id: str,
+    config: ScoringConfig,
+) -> float:
+    worker_location, worker_edge = _first_target_by_type(graph, worker_id, "LOCATED_IN")
+    job_location, job_edge = _first_target_by_type(graph, job_id, "BASED_IN")
     if not worker_location or not job_location:
-        return 0.5
-    return 1.0 if worker_location == job_location else 0.0
+        return config.location_flexible
+    if worker_location == job_location:
+        return config.location_exact
+    if worker_edge.get("willing_to_relocate", False) or job_edge.get("remote_ok", False):
+        return config.location_flexible
+    return config.location_mismatch
 
 
 def _labor_signals_for_job(graph: nx.DiGraph, job_id: str) -> list[LaborSignalNode]:
     signal_ids: set[str] = set(_out_edges_by_type(graph, job_id, "HAS_SIGNAL"))
 
-    sector_id = _first_target_by_type(graph, job_id, "IN_SECTOR")
+    sector_id, _ = _first_target_by_type(graph, job_id, "IN_SECTOR")
     if sector_id:
         signal_ids.update(_out_edges_by_type(graph, sector_id, "HAS_SIGNAL"))
 
-    occupation_id = _first_target_by_type(graph, job_id, "HAS_OCCUPATION")
+    occupation_id, _ = _first_target_by_type(graph, job_id, "HAS_OCCUPATION")
     if occupation_id:
         signal_ids.update(_out_edges_by_type(graph, occupation_id, "HAS_SIGNAL"))
 
@@ -90,11 +106,11 @@ def _labor_signals_for_job(graph: nx.DiGraph, job_id: str) -> list[LaborSignalNo
 
 
 def _automation_risk_for_job(graph: nx.DiGraph, job_id: str) -> AutomationRiskNode | None:
-    occupation_id = _first_target_by_type(graph, job_id, "HAS_OCCUPATION")
+    occupation_id, _ = _first_target_by_type(graph, job_id, "HAS_OCCUPATION")
     if not occupation_id:
         return None
 
-    risk_id = _first_target_by_type(graph, occupation_id, "HAS_AUTOMATION_RISK")
+    risk_id, _ = _first_target_by_type(graph, occupation_id, "HAS_AUTOMATION_RISK")
     if not risk_id:
         return None
 
@@ -129,9 +145,11 @@ def _gap_recommendations(
 def _explain(
     matched_skills: list[str],
     missing_skills: list[SkillGapRecommendation],
+    location_score: float,
     labor_signals: list[LaborSignalNode],
     automation_risk: AutomationRiskNode | None,
     graph: nx.DiGraph,
+    config: ScoringConfig,
 ) -> str:
     matched_labels = [
         graph.nodes[esco_id].get("label", esco_id)
@@ -143,6 +161,12 @@ def _explain(
         parts.append(f"Strongest evidence: {', '.join(matched_labels)}.")
     if missing_skills:
         parts.append(f"Main next step: build evidence for {missing_skills[0].label}.")
+    if location_score == config.location_exact:
+        parts.append("Same city.")
+    elif location_score == config.location_flexible:
+        parts.append("Different city, but remote or relocation flexibility is available.")
+    else:
+        parts.append("Different city; location may be a barrier.")
     if labor_signals:
         parts.append(f"Includes {len(labor_signals)} local labor market signal(s).")
     if automation_risk:
@@ -161,7 +185,7 @@ def _score_match(
     job_skills = _out_edges_by_type(graph, job_id, "REQUIRES_SKILL")
 
     skill_score, matched_skills, gaps = _score_skills(worker_skills, job_skills, config)
-    location_score = _score_location(graph, worker_id, job_id)
+    location_score = _score_location(graph, worker_id, job_id, config)
     score = config.skill_weight * skill_score + config.location_weight * location_score
 
     missing_skills = _gap_recommendations(graph, gaps, len(matched_skills))
@@ -181,9 +205,11 @@ def _score_match(
         explanation=_explain(
             matched_skills,
             missing_skills,
+            location_score,
             labor_signals,
             automation_risk,
             graph,
+            config,
         ),
     )
 
