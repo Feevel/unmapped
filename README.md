@@ -35,3 +35,7 @@ GET /jobs
 GET /matches/worker/{worker_id}
 GET /workers/{worker_id}/skills
 GET /jobs/{job_id}/skills
+
+Seed demo data:
+
+python -m app.scripts.seed_demo_data
