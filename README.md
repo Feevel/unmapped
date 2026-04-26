@@ -39,3 +39,23 @@ GET /jobs/{job_id}/skills
 Seed demo data:
 
 python -m app.scripts.seed_demo_data
+
+Run backend:
+
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
+
+Seed demo data:
+
+python -m app.scripts.seed_demo_data
+
+Endpoints:
+
+GET /health
+POST /workers
+GET /workers
+POST /jobs
+GET /jobs
+GET /workers/{id}/skills
+GET /jobs/{id}/skills
+GET /matches/worker/{id}
