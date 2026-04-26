@@ -27,6 +27,16 @@ def extract_skills_from_text(text: str) -> list[str]:
     Returns plain skill names — the graph adapter converts these
     to proper esco_ids when building graph nodes.
     """
+    return [skill["name"] for skill in extract_skill_objects_from_text(text)]
+
+
+def extract_skill_objects_from_text(text: str) -> list[dict]:
+    """
+    Extract skills as structured objects.
+
+    The graph can use `id` as a portable ESCO node key when present,
+    while older callers can still use the `name` field only.
+    """
     try:
         return _extract_via_esco(text)
     except Exception as e:
@@ -34,17 +44,28 @@ def extract_skills_from_text(text: str) -> list[str]:
         return _extract_via_keywords(text)
 
 
-def _extract_via_esco(text: str) -> list[str]:
+def _extract_via_esco(text: str) -> list[dict]:
     """
     Use the FAISS/ESCO semantic search pipeline.
-    Returns ESCO skill labels (e.g. "repair mobile devices").
+    Returns ESCO skill objects.
     """
     from services.vector_store import search_esco
     result = search_esco(text)
-    return [skill["name"] for skill in result["results"]]
+    return [
+        {
+            "id": skill["id"],
+            "name": skill["name"],
+            "confidence": skill.get("confidence"),
+            "source": "esco_semantic_search",
+            "source_query": skill.get("source_query"),
+            "description": skill.get("description"),
+            "explanation": skill.get("explanation"),
+        }
+        for skill in result["results"]
+    ]
 
 
-def _extract_via_keywords(text: str) -> list[str]:
+def _extract_via_keywords(text: str) -> list[dict]:
     """
     Fallback keyword matcher. Used when FAISS index is not built yet.
     Returns plain skill strings — not ESCO mapped.
@@ -68,7 +89,15 @@ def _extract_via_keywords(text: str) -> list[str]:
     seen = set()
     for keyword, skill in keyword_map.items():
         if keyword in text and skill not in seen:
-            skills.append(skill)
+            skills.append({
+                "id": None,
+                "name": skill,
+                "confidence": 0.6,
+                "source": "keyword_fallback",
+                "source_query": keyword,
+                "description": None,
+                "explanation": f"Matched fallback keyword '{keyword}'",
+            })
             seen.add(skill)
 
     return skills

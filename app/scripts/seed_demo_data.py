@@ -34,10 +34,10 @@ db.commit()
 db.refresh(amara)
 
 db.add_all([
-    WorkerSkill(worker_id=amara.id, skill_name="repair mobile devices"),
-    WorkerSkill(worker_id=amara.id, skill_name="customer service"),
-    WorkerSkill(worker_id=amara.id, skill_name="basic programming"),
-    WorkerSkill(worker_id=amara.id, skill_name="manage payments"),
+    WorkerSkill(worker_id=amara.id, skill_name="repair mobile devices", confidence=0.90, source="follow_up_assessment"),
+    WorkerSkill(worker_id=amara.id, skill_name="customer service", confidence=0.78, source="follow_up_assessment"),
+    WorkerSkill(worker_id=amara.id, skill_name="basic programming", confidence=0.62, source="self_reported"),
+    WorkerSkill(worker_id=amara.id, skill_name="manage payments", confidence=0.74, source="follow_up_assessment"),
 ])
 
 kwame = Worker(
@@ -53,9 +53,9 @@ db.commit()
 db.refresh(kwame)
 
 db.add_all([
-    WorkerSkill(worker_id=kwame.id, skill_name="crop cultivation"),
-    WorkerSkill(worker_id=kwame.id, skill_name="team management"),
-    WorkerSkill(worker_id=kwame.id, skill_name="record keeping"),
+    WorkerSkill(worker_id=kwame.id, skill_name="crop cultivation", confidence=0.86, source="follow_up_assessment"),
+    WorkerSkill(worker_id=kwame.id, skill_name="team management", confidence=0.72, source="self_reported"),
+    WorkerSkill(worker_id=kwame.id, skill_name="record keeping", confidence=0.68, source="self_reported"),
 ])
 
 # ── Jobs ──────────────────────────────────────────────────────
@@ -73,9 +73,9 @@ db.commit()
 db.refresh(job1)
 
 db.add_all([
-    JobSkill(job_id=job1.id, skill_name="repair mobile devices"),
-    JobSkill(job_id=job1.id, skill_name="customer service"),
-    JobSkill(job_id=job1.id, skill_name="manage inventory"),
+    JobSkill(job_id=job1.id, skill_name="repair mobile devices", importance="required"),
+    JobSkill(job_id=job1.id, skill_name="customer service", importance="required"),
+    JobSkill(job_id=job1.id, skill_name="manage inventory", importance="preferred"),
 ])
 
 job2 = Job(
@@ -91,9 +91,9 @@ db.commit()
 db.refresh(job2)
 
 db.add_all([
-    JobSkill(job_id=job2.id, skill_name="basic programming"),
-    JobSkill(job_id=job2.id, skill_name="customer service"),
-    JobSkill(job_id=job2.id, skill_name="repair mobile devices"),
+    JobSkill(job_id=job2.id, skill_name="basic programming", importance="preferred"),
+    JobSkill(job_id=job2.id, skill_name="customer service", importance="required"),
+    JobSkill(job_id=job2.id, skill_name="repair mobile devices", importance="required"),
 ])
 
 job3 = Job(
@@ -109,9 +109,9 @@ db.commit()
 db.refresh(job3)
 
 db.add_all([
-    JobSkill(job_id=job3.id, skill_name="crop cultivation"),
-    JobSkill(job_id=job3.id, skill_name="record keeping"),
-    JobSkill(job_id=job3.id, skill_name="team management"),
+    JobSkill(job_id=job3.id, skill_name="crop cultivation", importance="required"),
+    JobSkill(job_id=job3.id, skill_name="record keeping", importance="required"),
+    JobSkill(job_id=job3.id, skill_name="team management", importance="preferred"),
 ])
 
 db.commit()

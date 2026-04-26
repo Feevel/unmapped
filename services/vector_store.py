@@ -1,30 +1,51 @@
-import faiss
 import json
-import numpy as np
-from sentence_transformers import SentenceTransformer
-import ollama
 from pathlib import Path
 
-# ---------- INIT ----------
-model = SentenceTransformer("all-MiniLM-L6-v2")
+try:
+    import ollama
+except ImportError:
+    ollama = None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
-index = faiss.read_index(str(DATA_DIR / "faiss.index"))
-
-with open(DATA_DIR / "id_map.json", "r", encoding="utf-8") as f:
-    skills_db = json.load(f)
+model = None
+index = None
+skills_db = None
 
 # ---------- CACHE ----------
 
 rewrite_cache = {}
+store_cache = {}
+
+
+def _load_store():
+    global model, index, skills_db
+
+    if model is not None and index is not None and skills_db is not None:
+        return model, index, skills_db
+
+    import faiss
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    index = faiss.read_index(str(DATA_DIR / "faiss.index"))
+
+    with open(DATA_DIR / "id_map.json", "r", encoding="utf-8") as f:
+        skills_db = json.load(f)
+
+    return model, index, skills_db
 
 # ---------- LLM QUERY REWRITE (OLLAMA) ----------
 
 def rewrite_query(user_input: str) -> str:
     if user_input in rewrite_cache:
         return rewrite_cache[user_input]
+
+    if ollama is None:
+        rewrite_cache[user_input] = user_input
+        return user_input
 
     prompt = f"""
 Extract atomic, professional ESCO-style skills.
@@ -42,10 +63,14 @@ Input:
 Output:
 """
 
-    response = ollama.chat(
-        model="mistral",
-        messages=[{"role": "user", "content": prompt}]
-    )
+    try:
+        response = ollama.chat(
+            model="mistral",
+            messages=[{"role": "user", "content": prompt}]
+        )
+    except Exception:
+        rewrite_cache[user_input] = user_input
+        return user_input
 
     text = response["message"]["content"].strip()
 
@@ -83,6 +108,9 @@ def normalize_score(score, min_s=0.2, max_s=0.9):
 # ---------- MAIN SEARCH ----------
 
 def search_esco(user_input, k_initial=12, per_skill_top=2, k_final=7):
+    model, index, skills_db = _load_store()
+    import numpy as np
+
     # 1. Rewrite input
     rewritten = rewrite_query(user_input)
 

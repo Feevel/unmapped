@@ -26,7 +26,6 @@ from graph.models import (
     JobNode,
     JobPost,
     JobSkillEdge,
-    JobLocationEdge,
     SkillNode,
     LocationNode,
     SkillSource,
@@ -55,6 +54,14 @@ def _location_id(city: str, country_code: str) -> str:
     return f"{country_code}-{_safe_id(city).upper()}"
 
 
+def _worker_node_id(worker_id: int | str) -> str:
+    return f"worker:{worker_id}"
+
+
+def _job_node_id(job_id: int | str) -> str:
+    return f"job:{job_id}"
+
+
 def _skill_node_from_name(skill_name: str) -> SkillNode:
     """
     Build a SkillNode from a plain skill name.
@@ -66,6 +73,18 @@ def _skill_node_from_name(skill_name: str) -> SkillNode:
         esco_id=_safe_id(skill_name),
         label=skill_name,
     )
+
+
+def _skill_id(row: WorkerSkill | JobSkill) -> str:
+    return getattr(row, "skill_id", None) or _safe_id(row.skill_name)
+
+
+def _skill_source(row: WorkerSkill | JobSkill) -> SkillSource:
+    source = getattr(row, "source", None) or SkillSource.esco_semantic_search.value
+    try:
+        return SkillSource(source)
+    except ValueError:
+        return SkillSource.esco_semantic_search
 
 
 # ─────────────────────────────────────────────────────────────
@@ -84,11 +103,18 @@ def _build_worker_profile(
     city         = worker.location
     location_id  = _location_id(city, country_code)
 
-    skill_nodes = [_skill_node_from_name(ws.skill_name) for ws in worker_skills]
+    skill_nodes = [
+        SkillNode(
+            esco_id=_skill_id(ws),
+            label=ws.skill_name,
+            category="esco" if getattr(ws, "skill_id", None) else "fallback",
+        )
+        for ws in worker_skills
+    ]
 
     profile = WorkerProfile(
         worker=WorkerNode(
-            worker_id=str(worker.id),
+            worker_id=_worker_node_id(worker.id),
             name=worker.name or f"Worker {worker.id}",
             country_code=country_code,
             location_id=location_id,
@@ -96,10 +122,10 @@ def _build_worker_profile(
         ),
         skills=[
             WorkerSkillEdge(
-                worker_id=str(worker.id),
-                esco_id=_safe_id(ws.skill_name),
-                confidence=getattr(ws, "confidence", 1.0),
-                source=SkillSource(getattr(ws, "source", SkillSource.assessed)),
+                worker_id=_worker_node_id(worker.id),
+                esco_id=_skill_id(ws),
+                confidence=getattr(ws, "confidence", None) or 1.0,
+                source=_skill_source(ws),
             )
             for ws in worker_skills
         ],
@@ -127,11 +153,18 @@ def _build_job_post(
     city         = job.location
     location_id  = _location_id(city, country_code)
 
-    skill_nodes = [_skill_node_from_name(js.skill_name) for js in job_skills]
+    skill_nodes = [
+        SkillNode(
+            esco_id=_skill_id(js),
+            label=js.skill_name,
+            category="esco" if getattr(js, "skill_id", None) else "fallback",
+        )
+        for js in job_skills
+    ]
 
     post = JobPost(
         job=JobNode(
-            job_id=str(job.id),
+            job_id=_job_node_id(job.id),
             title=job.title,
             country_code=country_code,
             location_id=location_id,
@@ -141,10 +174,10 @@ def _build_job_post(
         ),
         skills=[
             JobSkillEdge(
-                job_id=str(job.id),
-                esco_id=_safe_id(js.skill_name),
+                job_id=_job_node_id(job.id),
+                esco_id=_skill_id(js),
                 importance=SkillImportance(
-                    getattr(js, "importance", SkillImportance.required)
+                    getattr(js, "importance", None) or SkillImportance.required
                 ),
             )
             for js in job_skills
@@ -213,10 +246,10 @@ def get_matches_for_worker(worker_id: int, db: Session) -> list[dict]:
         )
 
         graphs.append(job_graph)
-        jobs_by_id[str(job.id)] = job
+        jobs_by_id[_job_node_id(job.id)] = job
 
     merged = merge_graphs(*graphs)
-    results = graph_match_worker_to_jobs(str(worker_id), merged)
+    results = graph_match_worker_to_jobs(_worker_node_id(worker_id), merged)
 
     response = []
     for result in results:
@@ -225,7 +258,7 @@ def get_matches_for_worker(worker_id: int, db: Session) -> list[dict]:
             continue
 
         response.append({
-            "job_id":         int(result.job_id),
+            "job_id":         int(result.job_id.removeprefix("job:")),
             "title":          job.title,
             "location":       job.location,
             "score":          round(result.score * 100, 2),
@@ -274,29 +307,124 @@ def get_matches_for_worker(worker_id: int, db: Session) -> list[dict]:
 
 def _load_labor_signals(job: Job, db: Session) -> list[LaborSignalNode]:
     """
-    Return labor signals for this job's sector/occupation.
-    Currently returns an empty list — Part 3 wires in real data here.
+    Return visible demo labor signals for this job's sector/occupation.
+    Part 3 can replace this with real DB queries while preserving the API shape.
     """
-    return []
+    sector_id = _infer_sector_id(job)
+    title = job.title.lower()
+
+    if "agric" in title or "crop" in title or "farm" in title:
+        return [
+            LaborSignalNode(
+                signal_id=f"gh_{sector_id}_agriculture_employment",
+                label="Employment by sector",
+                value="Agriculture remains a major youth employment sector",
+                source="ILO ILOSTAT / World Bank WDI demo signal",
+                year=2024,
+                country_code="GH",
+                sector_id=sector_id,
+                explanation="Shows why nearby agricultural pathways are realistic rather than aspirational.",
+            ),
+            LaborSignalNode(
+                signal_id=f"gh_{sector_id}_informality",
+                label="Informal employment exposure",
+                value="High",
+                source="ILOSTAT informality demo signal",
+                year=2024,
+                country_code="GH",
+                sector_id=sector_id,
+                explanation="Flags that many opportunities may be informal or mixed formal/informal.",
+            ),
+        ]
+
+    return [
+        LaborSignalNode(
+            signal_id=f"gh_{sector_id}_digital_services_growth",
+            label="Digital services opportunity",
+            value="Growing local demand",
+            source="World Bank WDI / ITU demo signal",
+            year=2024,
+            country_code="GH",
+            sector_id=sector_id,
+            explanation="Connects repair and ICT support skills to reachable local service work.",
+        ),
+        LaborSignalNode(
+            signal_id=f"gh_{sector_id}_wage_employment_share",
+            label="Wage and salaried employment share",
+            value="Visible labor market constraint",
+            source="ILO modelled estimate demo signal",
+            year=2024,
+            country_code="GH",
+            sector_id=sector_id,
+            explanation="Reminds users that formal wage jobs are only one part of the opportunity landscape.",
+        ),
+    ]
 
 
 def _load_automation_risk(job: Job, db: Session) -> AutomationRiskNode | None:
     """
-    Return automation risk for this job's occupation.
-    Currently returns None — Part 3 wires in Frey-Osborne data here.
+    Return demo automation exposure by inferred occupation.
+    Part 3 can replace this with Frey-Osborne / O*NET / ILO task data.
     """
-    return None
+    occupation_id = _infer_occupation_id(job)
+    title = job.title.lower()
+
+    if "agric" in title or "field" in title:
+        return AutomationRiskNode(
+            risk_id=f"risk_{occupation_id}",
+            occupation_id=occupation_id,
+            score=0.35,
+            level="medium",
+            source="Frey-Osborne / O*NET-derived demo signal",
+            calibration_note="Hands-on and local coordination tasks reduce full automation exposure.",
+        )
+
+    return AutomationRiskNode(
+        risk_id=f"risk_{occupation_id}",
+        occupation_id=occupation_id,
+        score=0.42,
+        level="medium",
+        source="Frey-Osborne / O*NET-derived demo signal",
+        calibration_note="Routine diagnostics face pressure, but hands-on repair and customer trust remain durable.",
+    )
 
 
 def _load_sector(job: Job) -> SectorNode | None:
-    sector_id = getattr(job, "sector_id", None)
-    if not sector_id:
-        return None
-    return SectorNode(sector_id=sector_id, label=sector_id)
+    sector_id = _infer_sector_id(job)
+    return SectorNode(sector_id=sector_id, label=sector_id.replace("_", " ").title())
 
 
 def _load_occupation(job: Job) -> OccupationNode | None:
-    occupation_id = getattr(job, "isco_code", None)
-    if not occupation_id:
-        return None
-    return OccupationNode(occupation_id=occupation_id, label=occupation_id)
+    occupation_id = _infer_occupation_id(job)
+    return OccupationNode(
+        occupation_id=occupation_id,
+        label=occupation_id.replace("_", " ").upper(),
+    )
+
+
+def _infer_sector_id(job: Job) -> str:
+    explicit = getattr(job, "sector_id", None)
+    if explicit:
+        return explicit
+
+    text = f"{job.title} {job.description}".lower()
+    if any(word in text for word in ["agric", "crop", "farm", "harvest"]):
+        return "agriculture"
+    if any(word in text for word in ["phone", "mobile", "ict", "software", "technical"]):
+        return "ict_services"
+    return "general_services"
+
+
+def _infer_occupation_id(job: Job) -> str:
+    explicit = getattr(job, "isco_code", None)
+    if explicit:
+        return explicit
+
+    text = f"{job.title} {job.description}".lower()
+    if any(word in text for word in ["phone", "mobile", "repair"]):
+        return "isco_7422"
+    if any(word in text for word in ["ict", "technical support", "help desk"]):
+        return "isco_3512"
+    if any(word in text for word in ["agric", "crop", "farm", "field"]):
+        return "isco_3142"
+    return "isco_unknown"

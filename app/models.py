@@ -26,6 +26,10 @@ class WorkerSkill(Base):
     id = Column(Integer, primary_key=True, index=True)
     worker_id = Column(Integer, ForeignKey("workers.id"))
     skill_name = Column(String, nullable=False)
+    skill_id = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    source = Column(String, nullable=True)
+    source_query = Column(String, nullable=True)
 
 
 class JobSkill(Base):
@@ -34,6 +38,11 @@ class JobSkill(Base):
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(Integer, ForeignKey("jobs.id"))
     skill_name = Column(String, nullable=False)
+    skill_id = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    source = Column(String, nullable=True)
+    source_query = Column(String, nullable=True)
+    importance = Column(String, nullable=True)
 
 
 class Match(Base):

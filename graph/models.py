@@ -10,6 +10,7 @@ class SkillSource(str, Enum):
     self_reported = "self_reported"
     follow_up_assessment = "follow_up_assessment"
     esco_semantic_search = "esco_semantic_search"
+    keyword_fallback = "keyword_fallback"
     credential = "credential"
 
 
