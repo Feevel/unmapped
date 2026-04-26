@@ -1,61 +1,44 @@
 # UNMAPPED Backend
 
-FastAPI backend for skill extraction and job matching.
+FastAPI backend for ESCO-backed skill extraction, graph matching, visible labor-market signals, and demo automation-risk context.
 
 ## Setup
 
-git clone https://github.com/Feevel/unmapped.git
-cd unmapped
-
-python -m venv .venv
-.venv\Scripts\activate
-
+```bash
 pip install -r requirements.txt
-
-## Run
-
+python -m app.create_tables
+python -m app.scripts.seed_demo_data
 python -m uvicorn app.main:app --reload
+```
 
-## API Docs
+For optional FAISS/sentence-transformers ESCO semantic search:
 
+```bash
+pip install -r requirements-ml.txt
+```
+
+API docs:
+
+```text
 http://127.0.0.1:8000/docs
+```
 
-How to run:
+## Demo Endpoints
 
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload
-
-Endpoints:
-
-GET /health
-POST /workers
-GET /workers
-POST /jobs
-GET /jobs
-GET /matches/worker/{worker_id}
+```text
+POST /workers/
+GET /workers/
 GET /workers/{worker_id}/skills
+
+POST /jobs/
+GET /jobs/
 GET /jobs/{job_id}/skills
 
-Seed demo data:
+GET /matches/worker/{worker_id}
+```
 
-python -m app.scripts.seed_demo_data
+`GET /matches/worker/{worker_id}` returns graph match scores, matched skills, skill-gap next steps, visible labor market signals, and automation-risk context.
 
-Run backend:
+## Notes
 
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload
-
-Seed demo data:
-
-python -m app.scripts.seed_demo_data
-
-Endpoints:
-
-GET /health
-POST /workers
-GET /workers
-POST /jobs
-GET /jobs
-GET /workers/{id}/skills
-GET /jobs/{id}/skills
-GET /matches/worker/{id}
+The ESCO vector search uses `data/faiss.index` and `data/id_map.json`. If the optional ML dependencies or Ollama/Mistral are not available, the API falls back to keyword matching so the demo can still run.

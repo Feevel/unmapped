@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Job, JobSkill
 from app.schemas import JobCreate, JobResponse
-from app.services.extraction_service import extract_skills_from_text
+from app.services.extraction_service import extract_skill_objects_from_text
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -23,13 +23,18 @@ def create_job(job_data: JobCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(job)
 
-    # Extract skills
-    skills = extract_skills_from_text(job.description)
+    # Extract ESCO-mapped requirements when available.
+    skills = extract_skill_objects_from_text(job.description)
 
     for skill in skills:
         job_skill = JobSkill(
             job_id=job.id,
-            skill_name=skill
+            skill_name=skill["name"],
+            skill_id=skill.get("id"),
+            confidence=skill.get("confidence"),
+            source=skill.get("source"),
+            source_query=skill.get("source_query"),
+            importance="required",
         )
         db.add(job_skill)
 
@@ -52,5 +57,15 @@ def get_job_skills(job_id: int, db: Session = Depends(get_db)):
 
     return {
         "job_id": job_id,
-        "skills": [skill.skill_name for skill in skills]
+        "skills": [
+            {
+                "id": skill.skill_id,
+                "name": skill.skill_name,
+                "confidence": skill.confidence,
+                "source": skill.source,
+                "source_query": skill.source_query,
+                "importance": skill.importance,
+            }
+            for skill in skills
+        ]
     }
