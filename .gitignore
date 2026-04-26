@@ -18,3 +18,16 @@ Thumbs.db
 
 # Databases
 *.db
+
+# Local hackathon docs
+docs/hackathon/
+
+# Cursor rules
+.cursor/rules/
+
+# Frontend (Next.js)
+node_modules/
+.next/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
